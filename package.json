@@ -1,0 +1,24 @@
+{
+  "name": "bard",
+  "version": "1.0.0",
+  "main": "bard.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pyadav60/Bard.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/pyadav60/Bard/issues"
+  },
+  "homepage": "https://github.com/pyadav60/Bard#readme",
+  "description": "",
+  "dependencies": {
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7"
+  }
+}
