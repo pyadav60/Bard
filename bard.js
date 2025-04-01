@@ -1,4 +1,3 @@
-//Bard
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 
@@ -28,7 +27,7 @@ client.on('interactionCreate', async interaction => {
 
         if (args.startsWith('http')) {
             await interaction.reply('🎶 Joining voice channel...');
-            // Voice handling logic will go here
+            // Play audio (we'll add this next)
         } else {
             await interaction.reply(`(${args})`);
         }
