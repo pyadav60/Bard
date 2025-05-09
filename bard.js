@@ -1,134 +1,104 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
-const { exec } = require('child_process');
-const { createAudioPlayer, createAudioResource, AudioPlayerStatus, joinVoiceChannel } = require('@discordjs/voice');
-const ytdl = require('ytdl-core'); // Keep ytdl-core for YouTube link handling
-const fs = require('fs');
-const path = require('path');
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+  getVoiceConnection,
+  entersState,
+  VoiceConnectionStatus
+} = require('@discordjs/voice');
+const play = require('play-dl');
 
+// Create Discord client
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildVoiceStates
-    ]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
 
+// Command prefix
+const PREFIX = 'bard, ';
+
+// YouTube URL checker
+const YT_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]+/;
+
+// On bot ready
 client.once('ready', () => {
-    console.log('Bard is ready!');
+  console.log('✅ Bard is online and ready to vibe!');
 });
 
-// Function to download YouTube audio using yt-dlp
-function downloadYouTubeAudio(url) {
-    return new Promise((resolve, reject) => {
-        // Define where to save the file
-        const outputDir = path.join(__dirname, 'downloads');
-        const outputFile = path.join(outputDir, 'downloaded_audio.mp3');
-
-        // Ensure the directory exists
-        if (!fs.existsSync(outputDir)) {
-            fs.mkdirSync(outputDir, { recursive: true });
-        }
-
-        // Run the yt-dlp command with specified output path
-        const downloadCommand = `yt-dlp -f bestaudio --extract-audio --audio-format mp3 --quiet -o "${outputFile}" ${url}`;
-        
-        console.log(`Running command: ${downloadCommand}`);
-
-        exec(downloadCommand, (error, stdout, stderr) => {
-            if (error) {
-                reject(`exec error: ${error}`);
-                return;
-            }
-            if (stderr) {
-                reject(`stderr: ${stderr}`);
-                return;
-            }
-
-            // If the download succeeds, return the output file path
-            resolve(outputFile);
-        });
-    });
-}
-
+// On message
 client.on('messageCreate', async (message) => {
-    if (!message.content.startsWith('bard,') || message.author.bot) return;
+  if (message.author.bot) return;
 
-    const args = message.content.slice(5).trim(); // Get text after 'bard,'
+  const content = message.content.trim();
+  if (!content.toLowerCase().startsWith(PREFIX)) return;
 
-    if (!args) {
-        await message.reply('You need to say something or provide a link!');
-        return;
-    }
+  const query = content.slice(PREFIX.length).trim();
 
-    if (args.startsWith('http')) {
-        if (ytdl.validateURL(args)) {
-            await message.reply('🎶 Joining voice channel...');
+  // Trim and check if valid YouTube URL
+  if (!YT_URL_REGEX.test(query)) {
+    return message.reply('❌ Please enter a valid YouTube URL.');
+  }
 
-            const channel = message.member.voice.channel;
-            if (!channel) {
-                await message.reply('You need to join a voice channel first!');
-                return;
-            }
+  await message.reply('🎶 Valid YouTube link detected. Preparing to play...');
 
-            try {
-                // Download the audio from the YouTube link
-                const audioFilePath = await downloadYouTubeAudio(args);
-                console.log("Audio file path:", audioFilePath);
+  const voiceChannel = message.member.voice.channel;
+  if (!voiceChannel) {
+    return message.reply('❌ You need to be in a voice channel first!');
+  }
 
-                // Check if the audio file exists
-                fs.exists(audioFilePath, (exists) => {
-                    if (!exists) {
-                        console.error("Audio file does not exist!");
-                        message.reply('There was an issue downloading the audio file.');
-                        return;
-                    }
-                    console.log("Audio file exists, proceeding...");
+  try {
+    const streamInfo = await play.stream(query, { quality: 2 });
+    const info = await play.video_basic_info(query);
+    const title = info.video_details.title;
 
-                    // Join the voice channel
-                    const connection = joinVoiceChannel({
-                        channelId: channel.id,
-                        guildId: message.guild.id,
-                        adapterCreator: message.guild.voiceAdapterCreator
-                    });
+    const resource = createAudioResource(streamInfo.stream, {
+      inputType: streamInfo.type,
+      inlineVolume: true
+    });
+    resource.volume.setVolume(1.0);
 
-                    // Log for debugging
-                    console.log('Attempting to join the voice channel...');
-                    connection.on('error', (error) => {
-                        console.error('Error while connecting to voice channel:', error);
-                    });
+    const player = createAudioPlayer();
 
-                    // Create an audio resource from the downloaded file
-                    const audioStream = fs.createReadStream(audioFilePath);
-                    const resource = createAudioResource(audioStream);
+    const connection = joinVoiceChannel({
+      channelId: voiceChannel.id,
+      guildId: voiceChannel.guild.id,
+      adapterCreator: voiceChannel.guild.voiceAdapterCreator
+    });
 
-                    // Create the audio player and play the resource
-                    const player = createAudioPlayer();
-                    connection.subscribe(player);
-                    player.play(resource);
+    // Wait for connection to be ready
+    await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+    connection.subscribe(player);
+    player.play(resource);
 
-                    // When the audio is done, disconnect from the channel
-                    player.on(AudioPlayerStatus.Idle, () => {
-                        console.log("Audio player idle, disconnecting...");
-                        setTimeout(() => {
-                            connection.destroy();
-                            console.log("Voice connection destroyed");
-                        }, 2000); // Add a delay before disconnecting
-                    });
+    await entersState(player, AudioPlayerStatus.Playing, 30_000);
 
-                    message.reply(`🎶 Now playing: ${args}`);
-                });
-            } catch (err) {
-                console.error('Error downloading or playing audio:', err);
-                message.reply('There was an error with downloading the audio.');
-            }
-        } else {
-            await message.reply(':C (I don\'t know that command!)');
-        }
-    } else {
-        await message.reply(`:blush: (${args})`);
-    }
+    message.channel.send(`▶️ Now playing: **${title}**`);
+
+    // Handle end of track
+    player.on(AudioPlayerStatus.Idle, () => {
+      const conn = getVoiceConnection(voiceChannel.guild.id);
+      if (conn) conn.destroy();
+    });
+
+    player.on('error', (err) => {
+      console.error('❌ Audio player error:', err);
+      message.channel.send('⚠️ Something went wrong during playback.');
+      const conn = getVoiceConnection(voiceChannel.guild.id);
+      if (conn) conn.destroy();
+    });
+
+  } catch (err) {
+    console.error('❌ Error during playback:', err);
+    message.reply('⚠️ Failed to play the track. Please try again.');
+  }
 });
 
+// Login using token
 client.login(process.env.DISCORD_TOKEN);
